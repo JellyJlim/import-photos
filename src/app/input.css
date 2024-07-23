@@ -1,0 +1,12 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+textarea
+{
+  width:100%;
+}
+
+.imgBox {
+  @apply object-contain p-1 bg-blue-100 border-solid border-4 hover:border-purple-200   data-[is-selected=true]:border-teal-400;
+}
