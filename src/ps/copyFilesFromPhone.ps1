@@ -1,18 +1,16 @@
 ﻿param(
-	[Parameter(position = 0)]
-	[string]$arrfiles =  '[["\\PhoneName\\Internal storage\\Pictures\\Messenger\\1702124892919.jpg.jpg","IMG0.jpg"],["\\PhoneName\\Internal storage\\DCIM\\Camera\\crowd_1440x960.heic","IMG3.heic"],["\\PhoneName\\Internal storage\\DCIM\\Camera\\20240209_171654.jpg","IMG6.jpg"],["\\PhoneName\\Internal storage\\DCIM\\Camera\\20240209_171648.jpg","IMG7.jpg"]]',
+  [Parameter(position = 0)]
+  # [string]$arrfiles =  '[["\\Apple iPhone\\Internal storage\\DCIM\\100CLOUD\\17041472.JPG","IMG0.jpg"],["\\Apple iPhone\\Internal storage\\DCIM\\100CLOUD\\17041473.JPG","IMG3.heic"],["\\Apple iPhone\\Internal storage\\DCIM\\100CLOUD\\17041476.JPG","IMG6.jpg"],["\\Apple iPhone\\Internal storage\\DCIM\\100CLOUD\\17041475.JPG","IMG7.jpg"]]',
+  [string]$arrfiles = '[["\\JlimThinQ\\Internal storage\\DCIM\\Camera\\20240201_101941.heic","20240201_101941.heic"],["\\JlimThinQ\\Internal storage\\DCIM\\Camera\\20240201_101940.heic","20240201_101940.heic"],["\\JlimThinQ\\Internal storage\\DCIM\\Camera\\20240201_101938.heic","20240201_101938.heic"]]',
   [Parameter(position = 1)]
-	[string]$phoneName = "PhoneName",
-	[Parameter(position = 2)]
-	[string]$strOutputDir = "c:\path\to\copy"
+  # [string]$phoneName = "Apple iPhone",
+  [string]$phoneName = "JlimThinQ",
+  [Parameter(position = 2)]
+  [string]$strOutputDir = "c:\path\to\copy"
 )
 
-Import-Module ".\ForEach-Parallel.ps1"
-
-function Create-Dir($path)
-{
-  if((Test-Path -Path $path))
-  {
+function Create-Dir($path) {
+  if ((Test-Path -Path $path)) {
     Remove-Item -Path $path -Recurse -Force | Out-Null
     Sleep -Milliseconds 100
   }
@@ -20,48 +18,44 @@ function Create-Dir($path)
 }
 
 $files = $arrfiles | ConvertFrom-Json
-$outputDir = $strOutputDir -replace "\\\\","\"
+$outputDir = $strOutputDir -replace "\\\\", "\"
 
 Create-Dir($strOutputDir)
 
-$files| ForEach-Parallel -ScriptBlock {  Param ($p1, $p2)
+$rootComputer = (new-object -com Shell.Application).NameSpace(0x11)
+
+$rootPhone = $rootComputer.Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1
+if ($rootPhone -eq $null) {
+  Write-Host "Not found '$phoneName' folder in This computer. Connect your phone."
+  Exit 999
+}
+
+$tempDirShell = (new-object -com Shell.Application).NameSpace($outputDir)
+if ($tempDirShell -eq $null) {
+  Write-Host "~Not Found Directroy", $outputDir,
+  Exit 999
+}
+
+$files | ForEach-Object {
   $sourcePath = $_[0];
   $targetName = $_[1];
-
-  $rootComputer = (new-object -com Shell.Application).NameSpace(0x11)
-  $rootPhone = $rootComputer.Items() | Where-Object {$_.Name -eq $p2} | Select-Object -First 1
-  if($rootPhone -eq $null)
-  {
-    throw "Not found '$p2' folder in This computer. Connect your phone."
+  if ($sourcePath -match '^\{[^\}]+\}\\') {
+    $sourcePath = $sourcePath -replace '^\{([^\}]+)\}\\', '\\$1\\'
   }
-
-  $newPath = $sourcePath -replace [regex]::Escape("\$p2"), ""
+  $newPath = $sourcePath -replace [regex]::Escape("\$phoneName"), ""
   $newPath = $newPath.TrimStart("\\")
   $source = $rootPhone.GetFolder.ParseName($newPath)
-  if($source -eq $null){
-    Write-Output "Not Found Files", $newPath
+  if ($source -eq $null) {
+    Write-Host "Not Found Files", $newPath
     return
   } 
-
-  $tempDirShell = (new-object -com Shell.Application).NameSpace($p1)
-  if($tempDirShell -eq $null){
-    Write-Output "~Not Found Directroy", $p1,
-     Exit 999
-  }
-  $startTime = Get-Date
-  $timeout = 2*60*1000;
   $tempDirShell.CopyHere($source, 20)
-  Do {
-    $CopiedFileName = Join-Path $p1 $source.Name
-    $CopiedFile = $tempDirShell.ParseName($source.Name)
-    $elapsedTime = (Get-Date) - $startTime
-    if ($elapsedTime.TotalMilliseconds -ge $timeout) {
-      Write-Output "~Timeout reached. Exiting loop."
-      break
-    }
-  }While( ($CopiedFile -eq $null) -and ($null -eq (Sleep -Milliseconds 1000)) )
-} -ArgumentList $outputDir, $phoneName # -WaitTimeout (20*60*1000)
 
-Remove-Module ("ForEach-Parallel")
+  $filename = [System.IO.Path]::GetFileName($newPath)
+  $outputPath = Join-Path $outputDir $filename
+  Rename-Item -Path $outputPath -NewName $targetName
+
+}
+
 
 

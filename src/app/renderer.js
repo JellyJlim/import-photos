@@ -15,24 +15,22 @@ let list = null;
 const thumbDir = "c:\\path\\to\\thumbnails\\";
 const photoDir = "c:\\path\\to\\copy\\";
 
-
 const strDevicId = document.getElementById("device-id");
 const strCntPhotos = document.getElementById("count-photos");
 const strCntDevices = document.getElementById("count-devices");
 const listDevice = document.getElementById("select-device");
-
 
 const generateRandomID = () => {
   return "xxxx-xxxx".replace(/[x]/g, function() {
     const chars = "abcdefghijklmnopqrstuvwxyz";
     return chars[Math.floor(Math.random() * chars.length)];
   });
-}
+};
 
-const getFileExtension = (filename) => {
+const getFileExtension = filename => {
   const parts = filename.split(".");
   return parts.length > 1 ? "." + parts.pop() : "";
-}
+};
 
 const showInfoToast = info => {
   Toastify({
@@ -58,7 +56,7 @@ const endTimer = id => {
     if (targetIdx != -1) {
       const startTime = arrTimer[targetIdx].startTime;
       arrTimer.splice(targetIdx, 1);
-      updateTimerInfo(id, endTime - startTime)
+      updateTimerInfo(id, endTime - startTime);
       return endTime - startTime;
     }
   }
@@ -66,13 +64,12 @@ const endTimer = id => {
 };
 
 const updateTimerInfo = (id, time) => {
-  const divTimeInfo = document.querySelector("#time-info")
+  const divTimeInfo = document.querySelector("#time-info");
   const pInfo = document.getElementById(id) || document.createElement("p");
-  pInfo.id = id
+  pInfo.id = id;
   pInfo.innerHTML = `${id}: ${time}ms`;
-  if(!divTimeInfo.querySelector(`#${id}`))
-    divTimeInfo.appendChild(pInfo);
-}
+  if (!divTimeInfo.querySelector(`#${id}`)) divTimeInfo.appendChild(pInfo);
+};
 
 const information = document.getElementById("info");
 information.innerText = `This app is using Chrome (v${window.electronAPI.chrome()}), Node.js (v${window.electronAPI.node()}), and Electron (v${window.electronAPI.electron()})`;
@@ -80,9 +77,19 @@ information.innerText = `This app is using Chrome (v${window.electronAPI.chrome(
 const container = document.createElement("div");
 document.body.append(container);
 
+const btnStdIn = document.getElementById("btn-test-stdin");
+btnStdIn.addEventListener("click", event => {
+  window.electronAPI.testStdin();
+  event.preventDefault();
+});
+const btnStdIn2 = document.getElementById("btn-test-stdin2");
+btnStdIn2.addEventListener("click", async event => {
+  event.preventDefault();
+  const result = await window.electronAPI.testStdin2(thumbDir, 200);
+  console.log("result");
+});
 
-
-const btnFindDevices = document.getElementById("btn-list-devices");
+const btnFindDevices = document.getElementById("btn-wait-device");
 btnFindDevices.addEventListener("click", event => {
   showInfoToast("Seaching Devices");
   strCntDevices.innerHTML = " : Searching...";
@@ -90,7 +97,34 @@ btnFindDevices.addEventListener("click", event => {
   for (let i = listDevice.children.length - 1; i >= 0; i--) {
     listDevice.removeChild(listDevice.children[i]);
   }
-  window.electronAPI.requestListDevices();
+  window.electronAPI
+    .waitForDevice("requestId-wait-device", "USB")
+    .then(data => {
+      console.log(data);
+    })
+    .catch(e => console.log(e));
+  event.preventDefault();
+});
+
+const btnStopProcess = document.getElementById("btn-stop-process");
+btnStopProcess.addEventListener("click", event => {
+  strCntDevices.innerHTML = " : Try to stop";
+  window.electronAPI.stopProcess("requestId-wait-device");
+  event.preventDefault();
+});
+
+const btnMonitorMobile = document.getElementById("btn-monitor-mobile-usb");
+btnMonitorMobile.addEventListener("click", event => {
+  window.electronAPI
+    .monitorMobileConnection("requestId-monitor-mobile")
+    .catch(e => console.log("monitoring failed"));
+  event.preventDefault();
+});
+
+const btnFindDeviceFromId = document.getElementById("btn-find-device-fromId");
+btnFindDeviceFromId.addEventListener("click", event => {
+  const deviceId = "";
+  window.electronAPI.findDeviceFromId(deviceId);
   event.preventDefault();
 });
 
@@ -100,10 +134,11 @@ btnListPhotos.addEventListener("click", event => {
   if (selectedIndex >= 0) {
     const selected = listDevice.options[selectedIndex];
     const deviceId = selected.value;
+    const deviceName = selected.label;
     console.log(selected, deviceId);
     strDevicId.innerText = `${selected.label}`;
     startTimer("list-up-photos");
-    window.electronAPI.requestListPhotos(deviceId, thumbDir);
+    window.electronAPI.requestListPhotos(deviceId, deviceName, thumbDir);
   }
   event.preventDefault();
 });
@@ -140,7 +175,7 @@ btnImportPhotos.addEventListener("click", event => {
       []
     );
     console.log("selected", selected);
-    if(selected.length > 0 )
+    if (selected.length > 0)
       window.electronAPI.requestImportPhotos(selected, deviceName, photoDir);
   }
   event.preventDefault();
@@ -156,12 +191,12 @@ window.electronAPI.onGeneralMsg(msg => {
   }
 });
 
-const checkError = value => (value && value.status === "error" ? true : false);
+const hasError = value => value?.status != "success";
 
 window.electronAPI.onUpdatePhotos(value => {
   endTimer("list-up-photos");
   console.log("html === event", value);
-  if (checkError()) {
+  if (hasError(value)) {
     console.log("ERROR hanpped");
     return;
   }
@@ -186,11 +221,11 @@ window.electronAPI.onUpdatePhotos(value => {
         //arrPhotos
         const photoData = data[idx];
         const photo = {};
-        const ext = getFileExtension(photoData.Name);
+        const ext = getFileExtension(photoData.name);
         photo.isSelected = false;
-        photo.thumb =  encodeURI(photoData.Thumb);
-        photo.source = photoData.Path + "\\" + photoData.Name;
-        photo.output = `IMG${idx}${ext}`;
+        photo.thumbnailName = encodeURI(photoData.thumbnailName);
+        photo.source = photoData.fullPath;
+        photo.output = `IMG${idx}.jpg`;
         arrPhotos[idx] = photo;
       }
     }
@@ -204,11 +239,15 @@ window.electronAPI.onUpdatePhotos(value => {
         el.style.textAlign = "center";
         el.style.width = "100%";
 
-        for (let idx = row * numImageLine; idx < row * numImageLine + numImageLine; idx++) {
+        for (
+          let idx = row * numImageLine;
+          idx < row * numImageLine + numImageLine;
+          idx++
+        ) {
           if (arrPhotos[idx]) {
             const photoData = arrPhotos[idx];
             const img = document.createElement("img");
-            img.src = `atom://${photoData.thumb}`;
+            img.src = `atom://${photoData.thumbnailName}`;
             img.style.height = "200px";
             img.style.display = "inline";
             img.style.width = "200px";
@@ -216,8 +255,8 @@ window.electronAPI.onUpdatePhotos(value => {
 
             img.dataset.isSelected = photoData.isSelected;
             img.addEventListener("click", function(e) {
-              arrPhotos[idx].isSelected = !(arrPhotos[idx].isSelected);
-              e.target.dataset.isSelected = arrPhotos[idx].isSelected
+              arrPhotos[idx].isSelected = !arrPhotos[idx].isSelected;
+              e.target.dataset.isSelected = arrPhotos[idx].isSelected;
             });
             el.appendChild(img);
           }
@@ -234,7 +273,7 @@ window.electronAPI.onUpdatePhotos(value => {
 window.electronAPI.onUpdateDevices(value => {
   btnFindDevices.disabled = false;
   console.log("onFoundDevice === event", value);
-  if (checkError()) {
+  if (hasError(value)) {
     console.log("ERROR hanpped");
     return;
   }
@@ -253,7 +292,7 @@ window.electronAPI.onUpdateDevices(value => {
 
 window.electronAPI.onFoundDevice(value => {
   console.log("onFoundDevice === event", value);
-  if (checkError()) {
+  if (hasError(value)) {
     console.log("ERROR hanpped");
     return;
   }
@@ -274,4 +313,4 @@ window.electronAPI.onFoundDevice(value => {
 
 window.electronAPI.onCompleteImport(value => {
   endTimer("import-photos");
-})
+});

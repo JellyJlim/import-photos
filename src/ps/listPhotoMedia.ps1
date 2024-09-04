@@ -20,7 +20,7 @@ $sources | ForEach-Object {
 	}
 	$devices += @{
 		deviceId    = $_.Id
-		name    = $_.Model
+		name    = $_.DisplayName
 		protocol = $_.ConnectionProtocol
 		drive       = $drive
 	}

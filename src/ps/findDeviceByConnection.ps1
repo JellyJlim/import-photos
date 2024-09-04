@@ -1,8 +1,8 @@
 param(
 	[Parameter(position = 0)]
-	[string]$Type = "Mobile",
+	[string]$Type = "MOBILE",
 	[Parameter(position = 1)]
-	[int]$sec_time_out = 0
+	[int]$SecTimeOut = 30
 )
 Add-Type -AssemblyName System.Runtime.WindowsRuntime
 [void][Windows.Media.Import.PhotoImportManager, Windows.Media.Import, ContentType = WindowsRuntime]
@@ -10,52 +10,82 @@ Add-Type -AssemblyName System.Runtime.WindowsRuntime
 Import-Module (".\AwaitOperation.psm1")
 Import-Module(".\Write-Json.psm1")
 
-$try_count = 0;
-$max_try_count = $sec_time_out;
-$found = $false;
-$guid_drive = "53f56307-b6bf-11d0-94f2-00a0c91efb8b"
-$devices = @()
-
+$TryCount = 0;
+$SecInterval = 2;
+$MaxTryCount = [int]($SecTimeOut/$SecInterval);
+$Found = $false;
+$GuidDrive = "53f56307-b6bf-11d0-94f2-00a0c91efb8b"
+$Device = @()
+$StartTime = Get-NumericCurrentTime
+$PreDeviceCount = 0
 Do {
-	$sources = AwaitOperation (
+	$FoundAllDevices = AwaitOperation (
 		[Windows.Media.Import.PhotoImportManager]::FindAllSourcesAsync()
 	) (
 		[System.Collections.Generic.IReadOnlyList[Windows.Media.Import.PhotoImportSource]]
 	)
-	$sources | ForEach-Object {
-		$drive = "";
-		if ($Type -eq "USB" -and ($_.Id -match $guid_drive)) {
-			#Write-Output "Found USB Drive"
-			$drive = (Get-Volume -FriendlyName $_.DisplayName).DriveLetter	
-			$found = $true
-			$protocol = "MSC"
-		}
-		elseif ($Type -eq "Mobile" -and (($_.ConnectionProtocol -match "MTP") -or ($_.ConnectionProtocol -match "PTP"))) {
-			#Write-Output "Found Mobile Stroage"
-			$protocol = $_.ConnectionProtocol
-			$found = $true
-		}
-		elseif ($Type -eq "") {
-			$protocol = "UNKNOWN"
-			$found = $true
-		}
-		if ($found -eq $true) {
-			$devices += @{
-				deviceId    = $_.Id
-				connectType = $Type
-				drive       = $drive
-				protocol    = $protocol
-				name    = $_.DisplayName
-			}
-			Write-Output (Write-Json $devices)
-			"AwaitOperation", "Write-Json" | Remove-Module
-			Exit 0
-		}
-		
+
+  $WaitDevices = @()
+	if ($Type -eq "USB"){
+		$WaitDevices = $FoundAllDevices | Where-Object { $_.Id -match $GuidDrive }
 	}
-	Start-Sleep -Seconds 2
-	$try_count++
+  elseif ($Type -eq "MOBILE") {
+    $WaitDevices = $FoundAllDevices | Where-Object {($_.ConnectionProtocol -match "MTP") -or ($_.ConnectionProtocol -match "PTP")}
+  }
+
+  # if(($TryCount -ne 0) -and ($WaitDevices.Count -gt $PreDeviceCount))
+  #  FOR TEST
+  if($WaitDevices.Count -gt $PreDeviceCount)
+  {
+    # devices added
+    $AddedDevice = $WaitDevices | Where-Object {
+      $deviceId = $_.Id
+      -not ($Device | Where-Object { $_.deviceId -eq $deviceId })
+    } | Select-Object -First 1
+    $Found = $AddedDevice.Id
+  }
+  else {
+    $Found = $false
+  }
+  $PreDeviceCount = $WaitDevices.Count
+
+  $Device = @()
+  $WaitDevices | ForEach-Object {
+    $Drive = @{}
+    if ($Type -eq "USB"){
+      $Drive = @{
+        "path" = ((Get-Volume -FriendlyName $_.DisplayName).DriveLetter)+":"
+      }
+    }
+    $Device += @{
+      deviceId    = $_.Id
+      key         = $_.Id
+      connectType = $Type
+      protocol    = $_.ConnectionProtocol
+      displayName = $_.DisplayName; 
+      name        = $_.DisplayName;
+      description = $_.Description
+      mountpoints = @($Drive)
+    }
+  }
+
+	$cur_time = Get-NumericCurrentTime
+	if($Found -eq $false){
+    Start-Sleep -Seconds $SecInterval
+  }
+	$TryCount++
 }
-Until ($found -or ($try_count -ge $max_try_count))
-"AwaitOperation", "Write-Json" | Remove-Module
-Exit 99
+Until (($Found -ne $false) -or ($TryCount -ge $MaxTryCount) -or (($cur_time - $StartTime) -gt $SecTimeOut))
+
+if($Found -ne $false){
+  $Result = @{
+    medias = $Device
+    selectedMediaKey = $Found
+  }
+  Write-Output (ConvertTo-ObjJson $Result)
+  "AwaitOperation", "Write-Json" | Remove-Module
+  Exit 0
+}else{
+  "AwaitOperation", "Write-Json" | Remove-Module
+  Exit 99
+}
